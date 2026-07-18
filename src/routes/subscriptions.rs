@@ -16,8 +16,8 @@ pub async fn subscribe(form: web::Form<FormData>, connection: web::Data<PgPool>)
         VALUES ($1, $2, $3, $4)
         "#,
         Uuid::new_v4(),
-        form.name,
         form.email,
+        form.name,
         Utc::now()
     )
     .execute(connection.get_ref())
