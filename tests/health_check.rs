@@ -1,5 +1,8 @@
 use std::net::TcpListener;
 
+use sqlx::{Connection, PgConnection};
+use zero2prod::configurations::{get_configuration};
+
 fn spawn_app() -> String {
     let listener = TcpListener::bind("127.0.0.1:0").expect("Failed to bind random port");
     let port = listener.local_addr().unwrap().port();
@@ -28,6 +31,11 @@ async fn health_check_works() {
 #[tokio::test]
 async fn subscribe_returns_a_200_for_valid_form_data() {
     let app_address = spawn_app();
+    let configuration = get_configuration().expect("Failed to read configuration");
+    let connection_string = configuration.database.connection_string();
+    let mut connection = PgConnection::connect(&connection_string)
+        .await
+        .expect("Failed to connect to postgres");
     let client = reqwest::Client::new();
 
     let body = "name=baba%20tova&email=babatova%40example.com";
@@ -40,12 +48,21 @@ async fn subscribe_returns_a_200_for_valid_form_data() {
         .expect("Faield to execute request");
 
     assert_eq!(200, response.status().as_u16());
+
+    let saved = sqlx::query!("SELECT email, name FROM subscriptions")
+        .fetch_one(&mut connection)
+        .await
+        .expect("Failed to fetch saved subscription");
+
+    assert_eq!(saved.email, "babatova@example.com");
+    assert_eq!(saved.name, "baba tova");
 }
 
 #[tokio::test]
 async fn subscribe_returns_a_400_when_data_is_missing() {
     let app_address = spawn_app();
     let client = reqwest::Client::new();
+
     let test_cases = vec![
         ("name=baba%20tova", "missing the email"),
         ("email=babatova%40example.com", "missing the name"),
