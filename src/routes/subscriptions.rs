@@ -1,10 +1,9 @@
 use actix_web::{HttpResponse, web};
 use chrono::Utc;
 use sqlx::PgPool;
-use unicode_segmentation::UnicodeSegmentation;
 use uuid::Uuid;
 
-use crate::domain::NewSubscriber;
+use crate::domain::{NewSubscriber, SubscriberName};
 
 #[derive(serde::Deserialize)]
 pub struct FormData {
@@ -21,29 +20,33 @@ pub struct FormData {
     )
 )]
 pub async fn subscribe(form: web::Form<FormData>, connection: web::Data<PgPool>) -> HttpResponse {
-    if !is_name_valid(&form.name) {
-        HttpResponse::BadRequest().finish()
-    } else {
-        match insert_subscriber(&form, &connection).await {
-            Ok(_) => HttpResponse::Ok().finish(),
-            Err(_) => HttpResponse::InternalServerError().finish(),
-        }
+    let new_subscriber = NewSubscriber {
+        email: form.0.email,
+        name: SubscriberName::parse(form.0.name),
+    };
+
+    match insert_subscriber(&new_subscriber, &connection).await {
+        Ok(_) => HttpResponse::Ok().finish(),
+        Err(_) => HttpResponse::InternalServerError().finish(),
     }
 }
 
 #[tracing::instrument(
     name = "Saving new subscriber details in the database",
-    skip(new_sub, connection)
+    skip(new_subscriber, connection)
 )]
-async fn insert_subscriber(new_sub: &NewSubscriber, connection: &PgPool) -> Result<(), sqlx::Error> {
+async fn insert_subscriber(
+    new_subscriber: &NewSubscriber,
+    connection: &PgPool,
+) -> Result<(), sqlx::Error> {
     sqlx::query!(
         r#"
         INSERT INTO subscriptions (id, email, name, subscribed_at)
         VALUES ($1, $2, $3, $4)
         "#,
         Uuid::new_v4(),
-        new_sub.email,
-        new_sub.name,
+        new_subscriber.email,
+        new_subscriber.name.as_ref(),
         Utc::now()
     )
     .execute(connection)
@@ -53,15 +56,4 @@ async fn insert_subscriber(new_sub: &NewSubscriber, connection: &PgPool) -> Resu
         e
     })?;
     Ok(())
-}
-
-fn is_name_valid(s: &String) -> bool {
-    let is_empty_or_whitespace = s.trim().is_empty();
-
-    let is_too_long = s.graphemes(true).count() > 256;
-
-    let forbidden_characters = vec!['/', '(', ')', '"', '<', '>', '\\', '{', '}'];
-    let contains_forbidden_characters = s.chars().any(|g| forbidden_characters.contains(&g));
-
-    return !(is_empty_or_whitespace || is_too_long || contains_forbidden_characters);
 }

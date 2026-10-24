@@ -16,10 +16,16 @@ impl SubscriberName {
         let forbidden_characters = vec!['/', '(', ')', '"', '<', '>', '\\', '{', '}'];
         let contains_forbidden_characters = s.chars().any(|g| forbidden_characters.contains(&g));
 
-        if !(is_empty_or_whitespace || is_too_long || contains_forbidden_characters) {
+        if is_empty_or_whitespace || is_too_long || contains_forbidden_characters {
             panic!("{} is not a valid subscriber name", s)
         } else {
             Self(s)
         }
+    }
+}
+
+impl AsRef<str> for SubscriberName {
+    fn as_ref(&self) -> &str {
+        &self.0
     }
 }
