@@ -1,6 +1,19 @@
-use super::subscriber_name::SubscriberName;
+use crate::routes::FormData;
+
+use super::SubscriberEmail;
+use super::SubscriberName;
 
 pub struct NewSubscriber {
-    pub email: String,
+    pub email: SubscriberEmail,
     pub name: SubscriberName,
+}
+
+impl TryFrom<FormData> for NewSubscriber {
+    type Error = String;
+
+    fn try_from(form: FormData) -> Result<Self, Self::Error> {
+        let name = SubscriberName::parse(form.name)?;
+        let email = SubscriberEmail::parse(form.email)?;
+        Ok(NewSubscriber { email, name })
+    }
 }
