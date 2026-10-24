@@ -1,9 +1,25 @@
 use std::net::TcpListener;
 
+use once_cell::sync::Lazy;
+use secrecy::{ExposeSecret, Secret};
 use sqlx::{Connection, Executor, PgConnection, PgPool};
+use tracing_subscriber::fmt::writer::BoxMakeWriter;
 use uuid::Uuid;
 use zero2prod::configurations::{DatabaseSettings, get_configuration};
 use zero2prod::startup::run;
+use zero2prod::telemetry::{get_subscriber, init_subscriber};
+
+static TRACING: Lazy<()> = Lazy::new(|| {
+    let subscriber_name = "test".to_string();
+    let default_filter_level = "info".to_string();
+    let sink = match std::env::var("TEST_LOG") {
+        Ok(_) => BoxMakeWriter::new(std::io::stdout),
+        Err(_) => BoxMakeWriter::new(std::io::sink),
+    };
+
+    let subscriber = get_subscriber(subscriber_name, default_filter_level, sink);
+    init_subscriber(subscriber);
+});
 
 pub struct TestApp {
     pub address: String,
@@ -11,6 +27,8 @@ pub struct TestApp {
 }
 
 async fn spawn_app() -> TestApp {
+    Lazy::force(&TRACING);
+
     let listener = TcpListener::bind("127.0.0.1:0").expect("Failed to bind random port");
     let port = listener.local_addr().unwrap().port();
     let address = format!("http://127.0.0.1:{}", port);
@@ -20,7 +38,7 @@ async fn spawn_app() -> TestApp {
     let connection_pool = configure_database(&configuration.database).await;
 
     let server = run(listener, connection_pool.clone()).expect("Failed to bind address");
-    let _ = tokio::spawn(server);
+    let _ = tokio::spawn(server).await;
 
     TestApp {
         address,
@@ -32,20 +50,24 @@ async fn configure_database(config: &DatabaseSettings) -> PgPool {
     let maintanance_settings = DatabaseSettings {
         database_name: "postgres".to_string(),
         username: "postgres".to_string(),
-        password: "password".to_string(),
+        password: Secret::new("password".to_string()),
         ..config.clone()
     };
 
-    let mut connection = PgConnection::connect(&maintanance_settings.connection_string())
-        .await
-        .expect("Failed to connect to postgres");
+    let mut connection = PgConnection::connect(
+        maintanance_settings
+            .connection_string_without_db()
+            .expose_secret(),
+    )
+    .await
+    .expect("Failed to connect to postgres");
 
     connection
         .execute(format!(r#"CREATE DATABASE "{}";"#, config.database_name).as_str())
         .await
         .expect("Failed to create database");
 
-    let connection_pool = PgPool::connect(&config.connection_string())
+    let connection_pool = PgPool::connect(config.connection_string().expose_secret())
         .await
         .expect("Failed to connect to postgres");
     sqlx::migrate!("./migrations")
