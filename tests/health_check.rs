@@ -1,8 +1,6 @@
-use std::net::TcpListener;
-
 use once_cell::sync::Lazy;
-use secrecy::{ExposeSecret, Secret};
 use sqlx::{Connection, Executor, PgConnection, PgPool};
+use std::net::TcpListener;
 use tracing_subscriber::fmt::writer::BoxMakeWriter;
 use uuid::Uuid;
 use zero2prod::configurations::{DatabaseSettings, get_configuration};
@@ -38,7 +36,8 @@ async fn spawn_app() -> TestApp {
     let connection_pool = configure_database(&configuration.database).await;
 
     let server = run(listener, connection_pool.clone()).expect("Failed to bind address");
-    let _ = tokio::spawn(server).await;
+    #[allow(clippy::let_underscore_future)]
+    let _ = tokio::spawn(server);
 
     TestApp {
         address,
@@ -47,27 +46,16 @@ async fn spawn_app() -> TestApp {
 }
 
 async fn configure_database(config: &DatabaseSettings) -> PgPool {
-    let maintanance_settings = DatabaseSettings {
-        database_name: "postgres".to_string(),
-        username: "postgres".to_string(),
-        password: Secret::new("password".to_string()),
-        ..config.clone()
-    };
-
-    let mut connection = PgConnection::connect(
-        maintanance_settings
-            .connection_string_without_db()
-            .expose_secret(),
-    )
-    .await
-    .expect("Failed to connect to postgres");
+    let mut connection = PgConnection::connect_with(&config.without_db())
+        .await
+        .expect("Failed to connect to postgres");
 
     connection
         .execute(format!(r#"CREATE DATABASE "{}";"#, config.database_name).as_str())
         .await
         .expect("Failed to create database");
 
-    let connection_pool = PgPool::connect(config.connection_string().expose_secret())
+    let connection_pool = PgPool::connect_with(config.with_db())
         .await
         .expect("Failed to connect to postgres");
     sqlx::migrate!("./migrations")
