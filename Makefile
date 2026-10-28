@@ -8,7 +8,7 @@ fmt:
 	cargo fmt -- --check
 
 udeps:
-	cargo +nightly udeps
+	cargo +nightly udeps --all-targets
 
 check:
 	SQLX_OFFLINE=true cargo check
